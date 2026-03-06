@@ -5,10 +5,12 @@ import (
 	"os"
 
 	"github.com/balavignesh16/hr/internal/config"
+	"github.com/balavignesh16/hr/internal/watcher"
+	"github.com/fsnotify/fsnotify"
 )
 
 func main() {
-	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	slog.SetDefault(logger)
 
 	cfg, err := config.ParseFlags()
@@ -23,8 +25,17 @@ func main() {
 		"exec_cmd", cfg.ExecCommand,
 	)
 
-	// Placeholder for future phases
-	// watcher := InitializeWatcher(cfg.RootPath)
-	// runner := InitializeRunner(cfg.BuildCommand, cfg.ExecCommand)
-	// Start main orchestration loop...
+	smartWatcher, err := watcher.NewSmartWatcher(cfg.RootPath)
+	if err != nil {
+		slog.Error("Failed to initialize watcher", "error", err)
+		os.Exit(1)
+	}
+
+	fileEvents := make(chan fsnotify.Event)
+
+	go smartWatcher.Run(fileEvents)
+	slog.Info("Watcher is actively listening for changes. Try saving a file!")
+	for event := range fileEvents {
+		slog.Info("File event detected", "file", event.Name, "operation", event.Op.String())
+	}
 }
