@@ -61,23 +61,26 @@ func main() {
 
 func triggerReload(ctx context.Context, pm *runner.Manager, buildCmd, execCmd string) {
 	slog.Info("=== REBUILDING ===")
-	
-	
-	pm.Stop()
 
-	
+	// 1. Attempt to build the NEW code first (while the old server is still running)
 	err := pm.Build(ctx, buildCmd)
 	if err != nil {
 		if err == context.Canceled {
-			return 
+			return // Another change happened, discard this build quietly
 		}
-		slog.Error("Build failed! Waiting for next file change...", "error", err)
-		return 
+		// If the build fails (e.g., syntax error), we log it and return early!
+		// pm.Stop() is NEVER called, meaning the old server stays alive.
+		slog.Error("Build failed! Old server is still running. Waiting for fix...", "error", err)
+		return
 	}
 
+	// 2. ONLY if the build succeeds, we stop the old server
+	pm.Stop()
+
+	// 3. Start the newly built server
 	err = pm.Run(execCmd)
 	if err != nil {
 		slog.Error("Failed to start server", "error", err)
-		time.Sleep(2 * time.Second) 
+		time.Sleep(2 * time.Second)
 	}
 }
