@@ -7,6 +7,7 @@ import (
 
 	"github.com/balavignesh16/hr/internal/config"
 	"github.com/balavignesh16/hr/internal/debouncer"
+	"github.com/balavignesh16/hr/internal/runner"
 	"github.com/balavignesh16/hr/internal/watcher"
 	"github.com/fsnotify/fsnotify"
 )
@@ -21,12 +22,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	slog.Info("Starting hotreload",
-		"root", cfg.RootPath,
-		"build_cmd", cfg.BuildCommand,
-		"exec_cmd", cfg.ExecCommand,
-	)
-
 	smartWatcher, err := watcher.NewSmartWatcher(cfg.RootPath)
 	if err != nil {
 		slog.Error("Failed to initialize watcher", "error", err)
@@ -37,13 +32,33 @@ func main() {
 	go smartWatcher.Run(fileEvents)
 
 	buildSignal := debouncer.New(fileEvents, 500*time.Millisecond)
+	procManager := runner.NewManager()
 
 	slog.Info("Watcher is actively listening for changes. Try saving a file!")
+
+	triggerReload(procManager, cfg.BuildCommand, cfg.ExecCommand)
 
 	for {
 		select {
 		case <-buildSignal:
-			slog.Info("=== TRIGGERING REBUILD AND RESTART ===")
+			triggerReload(procManager, cfg.BuildCommand, cfg.ExecCommand)
 		}
+	}
+}
+
+func triggerReload(pm *runner.Manager, buildCmd, execCmd string) {
+	slog.Info("=== REBUILDING ===")
+
+	pm.Stop()
+
+	err := pm.Build(buildCmd)
+	if err != nil {
+		slog.Error("Build failed! Waiting for next file change...", "error", err)
+		return
+	}
+
+	err = pm.Run(execCmd)
+	if err != nil {
+		slog.Error("Failed to start server", "error", err)
 	}
 }
