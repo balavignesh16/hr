@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"os"
 	"time"
+	"context"
 
 	"github.com/balavignesh16/hr/internal/config"
 	"github.com/balavignesh16/hr/internal/debouncer"
@@ -31,34 +32,52 @@ func main() {
 	fileEvents := make(chan fsnotify.Event)
 	go smartWatcher.Run(fileEvents)
 
+
 	buildSignal := debouncer.New(fileEvents, 500*time.Millisecond)
 	procManager := runner.NewManager()
 
 	slog.Info("Watcher is actively listening for changes. Try saving a file!")
 
-	triggerReload(procManager, cfg.BuildCommand, cfg.ExecCommand)
+	var cancelBuild context.CancelFunc
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancelBuild = cancel
+	go triggerReload(ctx, procManager, cfg.BuildCommand, cfg.ExecCommand)
 
 	for {
 		select {
 		case <-buildSignal:
-			triggerReload(procManager, cfg.BuildCommand, cfg.ExecCommand)
+			if cancelBuild != nil {
+				cancelBuild()
+			}
+			
+			ctx, cancel := context.WithCancel(context.Background())
+			cancelBuild = cancel
+			
+			go triggerReload(ctx, procManager, cfg.BuildCommand, cfg.ExecCommand)
 		}
 	}
 }
 
-func triggerReload(pm *runner.Manager, buildCmd, execCmd string) {
+func triggerReload(ctx context.Context, pm *runner.Manager, buildCmd, execCmd string) {
 	slog.Info("=== REBUILDING ===")
-
+	
+	
 	pm.Stop()
 
-	err := pm.Build(buildCmd)
+	
+	err := pm.Build(ctx, buildCmd)
 	if err != nil {
+		if err == context.Canceled {
+			return 
+		}
 		slog.Error("Build failed! Waiting for next file change...", "error", err)
-		return
+		return 
 	}
 
 	err = pm.Run(execCmd)
 	if err != nil {
 		slog.Error("Failed to start server", "error", err)
+		time.Sleep(2 * time.Second) 
 	}
 }

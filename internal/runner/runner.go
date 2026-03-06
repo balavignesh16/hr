@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"context"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -14,20 +15,22 @@ type Manager struct {
 func NewManager() *Manager {
 	return &Manager{}
 }
-
-func (m *Manager) Build(command string) error {
+func (m *Manager) Build(ctx context.Context, command string) error {
 	slog.Info("Building project...", "cmd", command)
-
+	
 	parts := strings.Fields(command)
 	if len(parts) == 0 {
 		return nil
 	}
-
-	cmd := exec.Command(parts[0], parts[1:]...)
+	cmd := exec.CommandContext(ctx, parts[0], parts[1:]...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-
-	return cmd.Run()
+	err := cmd.Run()
+	if ctx.Err() == context.Canceled {
+		slog.Warn("Build was interrupted by a new file change. Discarding...")
+		return ctx.Err()
+	}
+	return err
 }
 
 func (m *Manager) Run(command string) error {
